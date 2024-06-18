@@ -1,0 +1,307 @@
+#!/usr/bin/python3
+
+# Copyright (C) 2024 Elliot Killick <contact@elliotkillick.com>
+# Licensed under the AGPL License. See LICENSE file for details.
+
+# pylint: disable=invalid-name
+
+"""rss2newsletter application"""
+
+import argparse
+from typing import TextIO
+import configparser
+import time
+import os
+import re
+from collections.abc import Iterator
+import requests
+import feedparser
+from lxml import etree
+
+
+class rss2newsletter:
+    """
+    Convert RSS to email newsletters and send them using the Listmonk API automatically
+
+    On first run, we generate the processed entries file to start keeping track of new feed
+    entries.
+
+    On every run after that, we read the processed entries file checking for new entries since the
+    previous read. For each new entry found, we create and start a Listmonk campaign.
+
+    We use the full article URL as the unique identifier for each entry.
+    """
+
+    config: configparser.ConfigParser | None = None
+
+    def __init__(self):
+        """Program entry point"""
+
+        self.banner()
+
+        args = self.parse_args()
+        self.config = self.read_config_file(args.config)
+
+        while True:
+            self.program_loop()
+            time.sleep(int(self.config["FEED"]["POLL_INTERVAL"]))
+
+    def banner(self):
+        """Print program banner"""
+
+        print(
+            "\n"
+            "               d88b                             8        w    w\n"
+            '8d8b d88b d88b " dP 8d8b. .d88b Yb  db  dP d88b 8 .d88b w8ww w8ww .d88b 8d8b\n'
+            "8P   `Yb. `Yb.  dP  8P Y8 8.dP'  YbdPYbdP  `Yb. 8 8.dP'  8    8   8.dP' 8P\n"
+            "8    Y88P Y88P d888 8   8 `Y88P   YP  YP   Y88P 8 `Y88P  Y8P  Y8P `Y88P 8\n"
+            "... by @ElliotKillick\n"
+        )
+
+    def parse_args(self) -> argparse.Namespace:
+        """Parse command-line arguments"""
+
+        parser = argparse.ArgumentParser(
+            description="Convert an RSS feed to email newsletters",
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        )
+        parser.add_argument(
+            "-c",
+            "--config",
+            type=argparse.FileType("r"),
+            default="rss2newsletter.conf",
+            help="Program configuration file",
+        )
+        return parser.parse_args()
+
+    def read_config_file(self, config_file: TextIO) -> configparser.ConfigParser:
+        """Parse configuration file into application"""
+
+        config = configparser.ConfigParser()
+        config.read_file(config_file)
+
+        return config
+
+    def program_loop(self):
+        """Program infinite loop"""
+
+        feed = self.fetch_rss()
+        if not feed:
+            return
+
+        # Sort feed entries chronologically
+        feed.entries.reverse()
+
+        # On first run (processed entries file does not exist)
+        if self.populate_preexisting_entries((e.link for e in feed.entries)):
+            return
+
+        processed_entries_last_update = self.read_processed_entries_file()
+        for new_entry in self.check_for_new_entries(
+            processed_entries_last_update, feed.entries
+        ):
+            campaign_id = self.create_newsletter(new_entry.link, new_entry.title)
+            send_successful = self.send_newsletter(campaign_id)
+            if send_successful:
+                self.update_processed_entries_file(new_entry.link)
+
+    def fetch_rss(self) -> feedparser.FeedParserDict | None:
+        """Fetch and parse RSS"""
+
+        feed = feedparser.parse(self.config["FEED"]["URL"])
+        # In case of failure
+        if hasattr(feed, "bozo_exception"):
+            print(f"Error fetching RSS from: {self.config['FEED']['URL']}")
+            return None
+
+        return feed
+
+    def populate_preexisting_entries(self, entry_links: list[str]) -> bool:
+        """Don't process feed entries that existed before first run of rss2newsletter"""
+
+        if not os.path.exists(self.config["FEED"]["PROCESSED_ENTRIES_FILE"]):
+            print(
+                "Processed entries file does not exist: "
+                f"{self.config['FEED']['PROCESSED_ENTRIES_FILE']}. "
+                "Populating it for the first time..."
+            )
+            self.create_processed_entries_file(entry_links)
+            return True
+
+        print("Checking for new feed entries...")
+        return False
+
+    def create_processed_entries_file(self, entry_links: list[str]):
+        """Create initial processed entries file"""
+
+        with open(
+            self.config["FEED"]["PROCESSED_ENTRIES_FILE"], "w", encoding="utf-8"
+        ) as f:
+            f.write("\n".join(entry_links))
+
+    def update_processed_entries_file(self, entry_link: str):
+        """Update processed entries file by appending so new entries are no longer considered new"""
+
+        with open(
+            self.config["FEED"]["PROCESSED_ENTRIES_FILE"], "a", encoding="utf-8"
+        ) as f:
+            f.write(f"{entry_link}\n")
+
+    def read_processed_entries_file(self) -> list[str]:
+        """Read state of which entries have been processed"""
+
+        with open(
+            self.config["FEED"]["PROCESSED_ENTRIES_FILE"], "r", encoding="utf-8"
+        ) as f:
+            return f.read().strip("\n").split("\n")
+
+    def check_for_new_entries(
+        self,
+        proceseed_entries_last_update: list[str],
+        entries: list[feedparser.FeedParserDict],
+    ) -> Iterator[feedparser.FeedParserDict]:
+        """Iterate feed entries looking for any new ones"""
+
+        for entry in entries:
+            if entry.link not in proceseed_entries_last_update:
+                yield entry
+
+    def create_newsletter(self, link: str, title: str) -> int | None:
+        """Create newsletter with content and add campaign to Listmonk"""
+
+        print("Creating newsletter for:", title)
+        return self.create_campaign(title, self.create_content(link, title))
+
+    def create_content(self, link: str, title: str) -> str:
+        """Create content to be used as body of newsletter"""
+
+        with open(
+            self.config["NEWSLETTER"]["TEMPLATE_FILE"], "r", encoding="utf-8"
+        ) as f:
+            content = f.read()
+
+        content = content.replace("LINK_HERE", link)
+        content = content.replace("TITLE_HERE", title)
+
+        og_image = self.get_og_image(self.fetch_url(link))
+        if og_image:
+            content = content.replace("IMAGE_HERE", og_image)
+        else:
+            # Remove optional image section
+            content = re.sub(
+                "IMAGE_OPTIONAL_BEGIN.*IMAGE_OPTIONAL_END\n",
+                "",
+                content,
+                flags=re.DOTALL,
+            )
+
+        return content
+
+    def fetch_url(self, url: str) -> str | None:
+        """Get response body at a URL"""
+
+        while True:
+            try:
+                return requests.get(url, timeout=60).content
+            except requests.exceptions.ConnectionError:
+                print(f"Failed to fetch URL: {url}! Retrying in 60 seconds...")
+                time.sleep(60)
+
+    def get_og_image(self, html: str) -> str | None:
+        """Get Open Graph cover image URL from given HTML"""
+
+        # I've confirmed (by testing with a payload) that HTMLParser is NOT vulnerable to XXE
+        # https://bugs.launchpad.net/lxml/+bug/1742885
+        # https://lxml.de/4.0/api/lxml.etree.HTMLParser-class.html
+        tree = etree.fromstring(html, etree.HTMLParser())
+
+        og_image = tree.find("head/meta[@property='og:image']")
+        if og_image is not None:
+            return og_image.get("content")
+
+    def send_newsletter(self, campaign_id: int) -> bool:
+        """Given a campaign ID tell Listmonk to start it then perform error handling"""
+
+        if int(self.config["LISTMONK"]["DRY_RUN"]):
+            print("Dry run: Not sending newsletter")
+            return True
+
+        print("Sending newsletter...")
+        status_code = self.start_campaign(campaign_id)
+        if status_code == 200:
+            print("Successfully started campaign!")
+            return True
+
+        print("Error starting campaign!")
+        return False
+
+    def create_campaign(self, title: str, body: str) -> int:
+        """Create Listmonk email campaign for new article"""
+
+        headers = {"Content-Type": "application/json;charset=utf-8"}
+
+        name = self.config["NEWSLETTER"]["SUBJECT_LINE"].replace("TITLE_HERE", title)
+
+        json_data = {
+            "name": name,
+            "subject": name,
+            "lists": [1],
+            "content_type": "richtext",
+            "body": body,
+            "messenger": "email",
+            "type": "regular",
+            "tags": ["rss2newsletter"],
+        }
+
+        while True:
+            try:
+                response = requests.post(
+                    f"{self.config['LISTMONK']['URL']}/api/campaigns",
+                    headers=headers,
+                    json=json_data,
+                    auth=(
+                        self.config["LISTMONK"]["USERNAME"],
+                        self.config["LISTMONK"]["PASSWORD"],
+                    ),
+                    timeout=60,
+                )
+                break
+            except requests.exceptions.ConnectionError:
+                print(
+                    "Failed to send Listmonk campaign create request! Retrying in 60 seconds..."
+                )
+                time.sleep(60)
+
+        return response.json()["data"]["id"]
+
+    def start_campaign(self, campaign_id: int) -> int:
+        """Start Listmonk email campaign"""
+
+        headers = {"Content-Type": "application/json"}
+        json_data = {"status": "running"}
+
+        while True:
+            try:
+                response = requests.put(
+                    f"{self.config['LISTMONK']['URL']}"
+                    f"/api/campaigns/{campaign_id}/status",
+                    headers=headers,
+                    json=json_data,
+                    auth=(
+                        self.config["LISTMONK"]["USERNAME"],
+                        self.config["LISTMONK"]["PASSWORD"],
+                    ),
+                    timeout=60,
+                )
+                break
+            except requests.exceptions.ConnectionError:
+                print(
+                    "Failed to send Listmonk campaign start request! Retrying in 60 seconds..."
+                )
+                time.sleep(60)
+
+        return response.status_code
+
+
+if __name__ == "__main__":
+    rss2newsletter()

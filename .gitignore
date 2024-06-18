@@ -1,0 +1,7 @@
+processed_entries.txt
+
+*.swp
+*.swo
+
+rss2newsletter.egg-info
+dist

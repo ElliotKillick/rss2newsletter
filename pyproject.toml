@@ -1,0 +1,18 @@
+[project]
+name = "rss2newsletter"
+version = "1.0.5"
+authors = [
+  { name="Elliot Killick", email="contact@elliotkillick.com" },
+]
+description = "Convert RSS/Atom feed to email newsletters with listmonk"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/ElliotKillick/rss2newsletter"
+Issues = "https://github.com/ElliotKillick/rss2newsletter/issues"
