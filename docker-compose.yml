@@ -1,0 +1,7 @@
+services:
+  rss2newsletter:
+    image: rss2newsletter
+    container_name: rss2newsletter
+    restart: unless-stopped
+    volumes:
+      - ./rss2newsletter.conf:/rss2newsletter/rss2newsletter.conf
