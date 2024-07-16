@@ -5,3 +5,4 @@ services:
     restart: unless-stopped
     volumes:
       - ./rss2newsletter.conf:/rss2newsletter/rss2newsletter.conf
+      - ./newsletter_template.html:/rss2newsletter/newsletter_template.html
