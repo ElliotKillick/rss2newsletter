@@ -111,8 +111,7 @@ class rss2newsletter:
         feed = feedparser.parse(self.config["FEED"]["URL"])
         # In case of failure
         if hasattr(feed, "bozo_exception"):
-            print(f"Error fetching RSS from: {self.config['FEED']['URL']}")
-            return None
+            raise Exception(f"Error fetching RSS from: {self.config['FEED']['URL']}")
 
         return feed
 
