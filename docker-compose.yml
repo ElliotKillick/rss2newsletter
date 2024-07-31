@@ -6,3 +6,9 @@ services:
     volumes:
       - ./rss2newsletter.conf:/rss2newsletter/rss2newsletter.conf
       - ./newsletter_template.html:/rss2newsletter/newsletter_template.html
+      - type: volume
+        source: rss2newsletter-data
+        target: /rss2newsletter/data
+
+volumes:
+  rss2newsletter-data:
