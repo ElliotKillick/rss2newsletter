@@ -49,6 +49,20 @@ options:
                         Program configuration file
                         (default: rss2newsletter.conf)
 ```
+## Supported RSS tags in the newsletter template
+You can design your own newsletter template by modifying the [newsletter template file](https://raw.githubusercontent.com/ElliotKillick/rss2newsletter/main/newsletter_template.html). Certain keywords in the template are automatically replaced by their corresponding RSS tags.
+
+| **template keyword** | **RSS tag** |
+| :---: | :---: |
+| LINK_HERE | link |
+| TITLE_HERE | title |
+| SUMMARY_HERE | description |
+| PUBLISHED_HERE | pubdate |
+| CONTENT_HERE | content |
+| AUTHOR_NAME_HERE | author (name) |
+| AUTHOR_EMAIL_HERE | author (email) |
+| TAGS_HERE | category (as comma separated string) |
+| MEDIA_HERE | media (url) |
 
 ## Support the Author
 
