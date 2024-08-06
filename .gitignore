@@ -2,6 +2,7 @@ processed_entries.txt
 
 *.swp
 *.swo
+*.old
 
 rss2newsletter.egg-info
 dist
