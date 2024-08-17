@@ -193,18 +193,16 @@ class rss2newsletter:
         if hasattr(feed, "author"):
             email = feed.author.split(' ')[0]
             content = content.replace("AUTHOR_EMAIL_HERE", email)
-            start_index_author = feed.author.find('(') + 1
+            start_index_author = feed.author.find('(')
             end_index_author = feed.author.find(')')
             if start_index_author != -1 and end_index_author != -1:
-                author = feed.author[start_index_author:end_index_author]
+                author = feed.author[start_index_author + 1:end_index_author]
                 content = content.replace("AUTHOR_NAME_HERE", author)
         if hasattr(feed, "tags"):
             tags_string = ", ".join([tag.term for tag in feed.tags])
             content = content.replace("TAGS_HERE", tags_string)
         if hasattr(feed, "media_content") and len(feed.media_content) > 0:
             content = content.replace("MEDIA_HERE", feed.media_content[0]["url"])
-
-        print(feed)
 
         og_image = self.get_og_image(self.fetch_url(feed.link))
         if og_image:
