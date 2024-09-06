@@ -100,7 +100,7 @@ class rss2newsletter:
         for new_entry in self.check_for_new_entries(
             processed_entries_last_update, feed.entries
         ):
-            campaign_id = self.create_newsletter(new_entry.link, new_entry.title)
+            campaign_id = self.create_newsletter(new_entry)
             send_successful = self.send_newsletter(campaign_id)
             if send_successful:
                 self.update_processed_entries_file(new_entry.link)
@@ -111,8 +111,7 @@ class rss2newsletter:
         feed = feedparser.parse(self.config["FEED"]["URL"])
         # In case of failure
         if hasattr(feed, "bozo_exception"):
-            print(f"Error fetching RSS from: {self.config['FEED']['URL']}")
-            return None
+            raise Exception(f"Error fetching RSS from: {self.config['FEED']['URL']}")
 
         return feed
 
@@ -166,13 +165,13 @@ class rss2newsletter:
             if entry.link not in proceseed_entries_last_update:
                 yield entry
 
-    def create_newsletter(self, link: str, title: str) -> int | None:
+    def create_newsletter(self, feed: feedparser.FeedParserDict) -> int | None:
         """Create newsletter with content and add campaign to Listmonk"""
 
-        print("Creating newsletter for:", title)
-        return self.create_campaign(title, self.create_content(link, title))
+        print("Creating newsletter for:", feed.title)
+        return self.create_campaign(feed.title, self.create_content(feed))
 
-    def create_content(self, link: str, title: str) -> str:
+    def create_content(self, feed: feedparser.FeedParserDict) -> str:
         """Create content to be used as body of newsletter"""
 
         with open(
@@ -180,10 +179,32 @@ class rss2newsletter:
         ) as f:
             content = f.read()
 
-        content = content.replace("LINK_HERE", link)
-        content = content.replace("TITLE_HERE", title)
 
-        og_image = self.get_og_image(self.fetch_url(link))
+        if hasattr(feed, "link"):
+            content = content.replace("LINK_HERE", feed.link)
+        if hasattr(feed, "title"):
+            content = content.replace("TITLE_HERE", feed.title)
+        if hasattr(feed, "summary"):
+            content = content.replace("SUMMARY_HERE", feed.summary)
+        if hasattr(feed, "published_parsed"):
+            content = content.replace("PUBLISHED_HERE", time.strftime("%d-%m-%Y", feed.published_parsed))
+        if hasattr(feed, "content") and len(feed.content) > 0:
+            content = content.replace("CONTENT_HERE", feed.content[0].value)
+        if hasattr(feed, "author"):
+            email = feed.author.split(' ')[0]
+            content = content.replace("AUTHOR_EMAIL_HERE", email)
+            start_index_author = feed.author.find('(')
+            end_index_author = feed.author.find(')')
+            if start_index_author != -1 and end_index_author != -1:
+                author = feed.author[start_index_author + 1:end_index_author]
+                content = content.replace("AUTHOR_NAME_HERE", author)
+        if hasattr(feed, "tags"):
+            tags_string = ", ".join([tag.term for tag in feed.tags])
+            content = content.replace("TAGS_HERE", tags_string)
+        if hasattr(feed, "media_content") and len(feed.media_content) > 0:
+            content = content.replace("MEDIA_HERE", feed.media_content[0]["url"])
+
+        og_image = self.get_og_image(self.fetch_url(feed.link))
         if og_image:
             content = content.replace("IMAGE_HERE", og_image)
         else:
@@ -245,7 +266,7 @@ class rss2newsletter:
         json_data = {
             "name": name,
             "subject": name,
-            "lists": [1],
+            "lists": [int(self.config["LISTMONK"]["LIST_ID"])],
             "content_type": "richtext",
             "body": body,
             "messenger": "email",
